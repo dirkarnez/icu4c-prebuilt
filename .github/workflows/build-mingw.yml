@@ -1,0 +1,61 @@
+name: cpp-cmake-mingw-prebuilt-release-actions-workflow
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+      - 'c*'
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: windows-latest
+    env:
+      libraryName: icu4c
+      installationPath: icu4c-installation
+      tagName: release-71-1 # target tag
+      mingwTargetZip: icu4c-${{ github.ref_name }}-x86_64-posix-seh-rev0-8.1.0.zip
+    steps:
+      - name: git clone
+        shell: cmd
+        run: git clone --recursive https://github.com/unicode-org/icu.git && cd icu && git checkout ${{ env.tagName }}
+      
+      - name: Install MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: MINGW64
+          install: make autoconf automake libtool autogen perl python
+          
+      - name: curl x86_64-8.1.0-release-posix-seh-rt_v6-rev0.7z
+        shell: cmd
+        run:  cd /d ${{ github.workspace }} && curl https://github.com/2641797006/c/blob/master/GCC-zip/x86_64-8.1.0-release-posix-seh-rt_v6-rev0.7z?raw=true -L --output x86_64-8.1.0-release-posix-seh-rt_v6-rev0.7z && dir && 7z.exe x x86_64-8.1.0-release-posix-seh-rt_v6-rev0.7z
+        
+      - name: set PATH, check mingw version, cmake generate, build and install
+        env:
+          CXXFLAGS: -std=c++14 -Wextra
+        shell: msys2 {0}
+        run: |
+            export PATH="${{ github.workspace }}/mingw64:${{ github.workspace }}/mingw64/bin:${{ github.workspace }}/msys64/usr/bin:/usr/bin" &&
+            cd icu/icu4c/source;
+            gcc --version;
+            mkdir build;
+            cd build;
+            ICU_DATA_BUILDTOOL_OPTS=--include_uni_core_data ../runConfigureICU MinGW --disable-layout --disable-layoutex --enable-icu-config --enable-static --with-library-bits=64 --with-data-packaging=static --enable-release --disable-extras --disable-tests --disable-samples --prefix="$(pwd)/${{ env.installationPath }}" && 
+            make.exe PKGDATA_MODE=static INCLUDE_UNI_CORE_DATA=1;
+            make.exe check;
+            make.exe install;
+            
+      - name: Archive Release
+        uses: thedoctor0/zip-release@master
+        with:
+          type: 'zip'
+          directory: "${{ github.workspace }}/icu/icu4c/source/build/${{ env.installationPath }}"
+          filename: "${{ env.mingwTargetZip }}"
+
+      - name: Release prebuilt
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "${{ github.workspace }}/icu/icu4c/source/build/${{ env.installationPath }}/${{ env.mingwTargetZip }}"
+          allowUpdates: true
+          token: ${{ secrets.GITHUB_TOKEN }}
